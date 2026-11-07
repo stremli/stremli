@@ -1,0 +1,22 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <uses-permission android:name="android.permission.INTERNET" />
+    <!-- In-app updates: hands a downloaded new version to Android's installer. -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+    <!-- Fire OS 13 and earlier (all current Fire TV sticks): lets Alexa voice commands
+         ("Alexa, pause / play / rewind 30 seconds / next") control the media session. -->
+    <uses-permission android:name="com.amazon.permission.media.session.voicecommandcontrol" />
+    <uses-feature android:name="android.software.leanback" android:required="false" />
+    <uses-feature android:name="android.hardware.touchscreen" android:required="false" />
+    <application android:label="Stremli" android:theme="@style/Theme.Stremli" android:usesCleartextTraffic="false" android:banner="@drawable/tv_banner" android:icon="@mipmap/ic_launcher">
+        <!-- Fire TV: deliver Alexa commands before the voice prompt takes audio focus, so
+             "Alexa, pause" does not let a moment of playback through. -->
+        <meta-data android:name="com.amazon.voice.supports_background_media_session" android:value="true" />
+        <provider android:name="androidx.core.content.FileProvider" android:authorities="${applicationId}.updates" android:exported="false" android:grantUriPermissions="true">
+            <meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/update_paths" />
+        </provider>
+        <activity android:name=".MainActivity" android:exported="true">
+            <intent-filter><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.LAUNCHER"/></intent-filter>
+            <intent-filter><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.LEANBACK_LAUNCHER"/></intent-filter>
+        </activity>
+    </application>
+</manifest>

@@ -1,0 +1,41 @@
+# Third-party notices
+
+## Google Sans Flex
+
+`app/src/main/res/font/google_sans_flex.ttf` is Google Sans Flex, Copyright 2015 The Google Sans Flex Authors, licensed under the SIL Open Font License 1.1. The full licence is in `docs/GoogleSansFlex-LICENSE.txt`.
+
+## Material Symbols
+
+The `sym_*` vector icons in `app/src/main/res/drawable/` are Material Symbols Rounded from https://github.com/google/material-design-icons, licensed under the Apache License 2.0.
+
+## Design reference: Mornye
+
+Stremli's colour scheme, type choices, radii and spacing follow the Material style of Mornye (https://github.com/mornyeapp/Mornye, LGPL-3.0). No Mornye code or assets are included; the palette was regenerated with Material colour utilities from a seed that matches its screenshots.
+
+## Flixclusive
+
+The TV player layout and seeking behaviour in `app/src/main/java/com/stremli/tv/PlayerScreen.kt` are adapted from Flixclusive (https://github.com/flixclusiveorg/Flixclusive), `feature/tv/player`.
+
+```
+MIT License
+
+Copyright (c) 2023 rhenwinch
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```

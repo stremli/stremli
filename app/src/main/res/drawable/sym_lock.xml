@@ -1,0 +1,10 @@
+<!-- Padlock, drawn to match the Material Symbols Rounded set. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="960"
+    android:viewportHeight="960">
+  <path
+      android:fillColor="@android:color/white"
+      android:pathData="M280,880Q247,880 223.5,856.5Q200,833 200,800L200,440Q200,407 223.5,383.5Q247,360 280,360L680,360Q713,360 736.5,383.5Q760,407 760,440L760,800Q760,833 736.5,856.5Q713,880 680,880L280,880ZM320,360L320,280Q320,213 366.5,166.5Q413,120 480,120Q547,120 593.5,166.5Q640,213 640,280L640,360L560,360L560,280Q560,247 536.5,223.5Q513,200 480,200Q447,200 423.5,223.5Q400,247 400,280L400,360L320,360Z"/>
+</vector>

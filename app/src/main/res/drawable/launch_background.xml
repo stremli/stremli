@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Shown by the window from the moment the launcher starts the app until the first Compose frame:
+     the theme surface with the wordmark, positioned exactly like the in-app launch screen. -->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:drawable="@color/stremli_surface" />
+    <item>
+        <bitmap android:gravity="center" android:src="@drawable/launch_logo" />
+    </item>
+</layer-list>

@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Theme surface (StremliColors.surface). -->
+    <color name="stremli_surface">#121318</color>
+
+    <!-- The window shows the branded launch background until Compose draws; MainActivity then
+         removes it so it is not drawn under every frame. -->
+    <style name="Theme.Stremli" parent="@android:style/Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@drawable/launch_background</item>
+        <item name="android:colorBackground">@color/stremli_surface</item>
+        <item name="android:statusBarColor">@color/stremli_surface</item>
+        <item name="android:navigationBarColor">@color/stremli_surface</item>
+        <item name="android:windowDisablePreview">false</item>
+    </style>
+</resources>

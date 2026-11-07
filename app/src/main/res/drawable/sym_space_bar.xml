@@ -1,0 +1,10 @@
+<!-- Material Symbols Rounded "space_bar" (Apache 2.0), the space key glyph used by Android keyboards. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="960"
+    android:viewportHeight="960">
+  <path
+      android:fillColor="@android:color/white"
+      android:pathData="M240,640Q223,640 211.5,628.5Q200,617 200,600L200,440Q200,423 211.5,411.5Q223,400 240,400Q257,400 268.5,411.5Q280,423 280,440L280,560L680,560L680,440Q680,423 691.5,411.5Q703,400 720,400Q737,400 748.5,411.5Q760,423 760,440L760,600Q760,617 748.5,628.5Q737,640 720,640L240,640Z"/>
+</vector>

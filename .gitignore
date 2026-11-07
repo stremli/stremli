@@ -1,0 +1,20 @@
+# Nothing is published unless it is listed here.
+/*
+!/.gitignore
+!/README.md
+!/app/
+!/build.gradle.kts
+!/gradle/
+!/gradle.properties
+!/gradlew
+!/gradlew.bat
+!/screenshots/
+!/settings.gradle.kts
+!/tools/
+
+/app/build/
+/tools/__pycache__/
+*.iml
+*.jks
+*.keystore
+local.properties
