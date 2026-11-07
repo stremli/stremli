@@ -18,11 +18,7 @@
 </a>
 &nbsp;
 <a href="https://github.com/stremli/stremli/issues/new">
-  <img src="https://img.shields.io/badge/🐞_REPORT_A_BUG-E5534B?style=for-the-badge&labelColor=1a1a2e" alt="Report a bug" height="42"/>
-</a>
-&nbsp;
-<a href="https://github.com/stremli/stremli/issues/new">
-  <img src="https://img.shields.io/badge/💡_SUGGEST_A_FEATURE-3FB950?style=for-the-badge&labelColor=1a1a2e" alt="Suggest a feature" height="42"/>
+  <img src="https://img.shields.io/badge/💡_REPORT_OR_SUGGEST-3FB950?style=for-the-badge&labelColor=1a1a2e" alt="Report a bug or suggest a feature" height="42"/>
 </a>
 
 <br/><br/>
