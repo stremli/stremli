@@ -80,6 +80,8 @@ object Updates {
     private const val MAX_MANIFEST_BYTES = 16 * 1024
     private const val MAX_APK_BYTES = 150L * 1024 * 1024
     private const val CHECK_EVERY_MS = 20L * 60 * 60 * 1000
+    /** After a failed check, as when offline, Home opening does not try again until this has passed. */
+    private const val RETRY_AFTER_MS = 60L * 60 * 1000
     private val REPO_NAME = Regex("""[A-Za-z0-9_.-]{1,100}/[A-Za-z0-9_.-]{1,100}""")
     private val SHA256 = Regex("[0-9a-f]{64}")
 
@@ -87,6 +89,8 @@ object Updates {
         private set
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    private var checking = false
+    private var lastTry = 0L
 
     private fun prefs(context: Context) = context.applicationContext.getSharedPreferences("stremli-device", 0)
 
@@ -100,11 +104,14 @@ object Updates {
     /** Checks at most about once a day, quietly. Called as the app starts and when Home opens. */
     fun checkIfDue(context: Context) {
         val app = context.applicationContext
-        if (!autoCheck(app) || status != UpdateStatus.Idle) return
+        if (!autoCheck(app) || status != UpdateStatus.Idle || checking) return
         val now = System.currentTimeMillis()
-        if (now - prefs(app).getLong("updateChecked", 0L) < CHECK_EVERY_MS) return
+        if (now - prefs(app).getLong("updateChecked", 0L) < CHECK_EVERY_MS || now - lastTry < RETRY_AFTER_MS) return
+        checking = true
+        lastTry = now
         scope.launch {
             val found = runCatching { withContext(Dispatchers.IO) { find(app) } }
+            checking = false
             found.onSuccess { update ->
                 prefs(app).edit().putLong("updateChecked", now).apply()
                 if (update != null) status = UpdateStatus.Available(update)
@@ -242,7 +249,9 @@ object Updates {
         finished.await(NOSTR_WAIT_SECONDS, TimeUnit.SECONDS)
         sockets.forEach { it.cancel() }
         val events = synchronized(seen) { seen.values.toList() }.sortedByDescending { it.optLong("created_at") }
-        val newest = events.firstOrNull(::trusted) ?: return null
+        val newest = events.firstOrNull(::trusted)
+        Log.i("Updates", "backup: ${events.size} found, ${if (newest != null) "signature good" else "none trusted"}")
+        if (newest == null) return null
         val createdAt = newest.getLong("created_at")
         // A replayed older pointer must not move the app back to a repo it has left.
         if (createdAt < prefs(context).getLong("updatePointerAt", 0L)) return null
@@ -262,7 +271,7 @@ object Updates {
         if (tags.none { it.size >= 2 && it[0] == "d" && it[1] == NOSTR_NAME }) return false
         val id = NostrVerify.eventId(NOSTR_PUBKEY, event.getLong("created_at"), NOSTR_KIND, tags, event.getString("content"))
         id == event.getString("id") && NostrVerify.verify(id, NOSTR_PUBKEY, event.getString("sig"))
-    }.getOrDefault(false)
+    }.onFailure { Log.w("Updates", "backup check failed: ${it.javaClass.simpleName}") }.getOrDefault(false)
 
     // ---- Downloading -------------------------------------------------------------------------
 

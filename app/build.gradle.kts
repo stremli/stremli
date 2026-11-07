@@ -6,7 +6,7 @@ android {
     namespace = "com.stremli.tv"
     compileSdk = 37
     defaultConfig {
-        applicationId = "com.stremli.tv"; minSdk = 25; targetSdk = 35; versionCode = 4; versionName = "1.0.2"
+        applicationId = "com.stremli.tv"; minSdk = 25; targetSdk = 35; versionCode = 5; versionName = "1.0.3"
         // Optional HTTPS URL of a Gotaku parameter file.
         // Set gotakuConfigUrl in gradle.properties or with -PgotakuConfigUrl=...; empty uses the built-in values.
         val configUrl = (project.findProperty("gotakuConfigUrl") as String?).orEmpty()

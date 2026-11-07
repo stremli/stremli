@@ -56,7 +56,7 @@ object NostrVerify {
         if (x >= P) return null
         val c = x.modPow(THREE, P).add(SEVEN).mod(P)
         val y = c.modPow(P.add(BigInteger.ONE).shiftRight(2), P)
-        if (y.modPow(BigInteger.TWO, P) != c) return null
+        if (y.multiply(y).mod(P) != c) return null
         return Point(x, if (y.testBit(0)) P.subtract(y) else y)
     }
 
