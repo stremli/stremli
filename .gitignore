@@ -1,6 +1,7 @@
 # Nothing is published unless it is listed here.
 /*
 !/.gitignore
+!/LICENSE
 !/README.md
 !/app/
 !/build.gradle.kts

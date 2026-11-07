@@ -11,6 +11,7 @@
 [![Stars](https://img.shields.io/github/stars/stremli/stremli?style=for-the-badge&color=7C9CFF&logo=github)](https://github.com/stremli/stremli/stargazers)
 [![Forks](https://img.shields.io/github/forks/stremli/stremli?style=for-the-badge&color=7C9CFF&logo=github)](https://github.com/stremli/stremli/network/members)
 [![Issues](https://img.shields.io/github/issues/stremli/stremli?style=for-the-badge&color=7C9CFF&logo=github)](https://github.com/stremli/stremli/issues)
+[![License](https://img.shields.io/github/license/stremli/stremli?style=for-the-badge&color=7C9CFF)](LICENSE)
 
 ![Fire TV Stick](https://img.shields.io/badge/Made_for-Fire_TV_Stick-FF9900?style=for-the-badge&logo=amazon&logoColor=white)
 ![1 GB ready](https://img.shields.io/badge/Runs_on-1_GB_sticks-FF9900?style=for-the-badge)
@@ -143,4 +144,4 @@ Stremli is open source, and it gets better with every person who pitches in.
 
 To build it, open this folder in Android Studio with JDK 17 or newer, or run `./gradlew assembleDebug`.
 
-Licences for the fonts, icons and other third-party work are in `app/src/main/assets`.
+Stremli is released under the [MIT License](LICENSE). Licences for the fonts, icons and other third-party work are in `app/src/main/assets`.
