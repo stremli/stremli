@@ -347,12 +347,6 @@ fun SettingsPage(
                                 auto = it; Updates.setAutoCheck(context, it)
                             }
                         }
-                        item(key = "update-backup") {
-                            Text(
-                                "If the download page ever moves, Stremli finds the new one by itself. You can also follow it on Nostr: ${Updates.NOSTR_NPUB}",
-                                Modifier.padding(horizontal = 18.dp), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
                         item(key = "buffer") {
                             val best = VideoBuffer.recommendedMb(context)
                             val range = VideoBuffer.range(DeviceProfile.of(context).tier)

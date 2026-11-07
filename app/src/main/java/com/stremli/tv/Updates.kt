@@ -72,7 +72,6 @@ val UpdateStatus.update: AppUpdate? get() = when (this) {
 object Updates {
     private const val DEFAULT_REPO = "stremli/stremli"
     private const val NOSTR_PUBKEY = "55c37a05f019663c951ec0298fd205a060471edc68dd1b0512043195f85db49b"
-    const val NOSTR_NPUB = "npub12hph5p0sr9nre9g7cq5cl5s95psyw8kudrw3kpgjqscet7zakjds0jn9te"
     private const val NOSTR_KIND = 30078
     private const val NOSTR_NAME = "stremli-update"
     private val NOSTR_RELAYS = listOf("wss://relay.damus.io", "wss://nos.lol", "wss://relay.primal.net", "wss://nostr.mom")
@@ -135,7 +134,10 @@ object Updates {
         val app = context.applicationContext
         if (status is UpdateStatus.Downloading) return
         if (Build.VERSION.SDK_INT >= 26 && !app.packageManager.canRequestPackageInstalls()) {
-            status = UpdateStatus.NeedsPermission(update)
+            // Android 11 closes the app when this is allowed, so say so first, and check again on the
+            // next start so the offer is waiting when it reopens.
+            if (status !is UpdateStatus.NeedsPermission) { status = UpdateStatus.NeedsPermission(update); return }
+            prefs(app).edit().remove("updateChecked").apply()
             runCatching { open(context, Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:${app.packageName}"))) }
             return
         }
@@ -324,7 +326,7 @@ fun updateSummary(status: UpdateStatus): String = "Stremli ${BuildConfig.VERSION
     UpdateStatus.UpToDate -> "Up to date"
     is UpdateStatus.Available -> "Version ${status.update.version} is ready"
     is UpdateStatus.Downloading -> "Downloading ${status.percent}%"
-    is UpdateStatus.NeedsPermission -> "Allow installs, then update again"
+    is UpdateStatus.NeedsPermission -> "Needs your OK to install updates"
     is UpdateStatus.Failed -> status.message
 }
 
@@ -348,7 +350,7 @@ fun UpdateSheet(allowed: Boolean) {
                 if (offer.notes.isNotBlank()) Text(offer.notes, style = MaterialTheme.typography.bodyMedium, color = c.onSurfaceVariant)
                 when (status) {
                     is UpdateStatus.NeedsPermission -> Text(
-                        "Allow Stremli to install apps. On Fire TV that is Settings, My Fire TV, Developer options, Install unknown apps. Then choose Update again.",
+                        "Stremli needs your OK to install updates. Next, turn on Stremli in the list. If that isn't offered, go to Settings, My Fire TV, Developer options, Install unknown apps. Stremli may close when you allow it. Just open it again.",
                         style = MaterialTheme.typography.bodyMedium, color = c.onSurface
                     )
                     is UpdateStatus.Failed -> Text(status.message, style = MaterialTheme.typography.bodyMedium, color = c.error)
@@ -356,7 +358,11 @@ fun UpdateSheet(allowed: Boolean) {
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(Tokens.gapSm)) {
                     PillButton(
-                        if (status is UpdateStatus.Downloading) "Downloading ${status.percent}%" else "Update now",
+                        when (status) {
+                            is UpdateStatus.Downloading -> "Downloading ${status.percent}%"
+                            is UpdateStatus.NeedsPermission -> "Open settings"
+                            else -> "Update now"
+                        },
                         { Updates.install(context, offer) }, Modifier.focusRequester(first), style = ButtonStyle.Filled
                     )
                     PillButton("Later", { Updates.dismiss(context, offer.code); closed = offer.code })

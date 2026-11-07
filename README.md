@@ -1,16 +1,72 @@
-<p align="center"><img src="screenshots/home.png" alt="Stremli home screen" width="800"></p>
+<div align="center">
+
+<img src="screenshots/icon.png" width="120" alt="Stremli" />
 
 # Stremli
 
-Stremli is a free anime app for Fire TV and Android TV. Browse thousands of series and films, follow what's airing, keep your lists in sync, and watch from the couch with nothing but your remote. It's built to stay fast and light, even on a 1 GB Fire TV Stick.
+### The anime app built for your Fire TV Stick
 
-No ads, no analytics.
+[![Latest Release](https://img.shields.io/github/v/release/stremli/stremli?style=for-the-badge&label=Release&color=7C9CFF&logo=github)](https://github.com/stremli/stremli/releases/latest)
+[![Downloads](https://img.shields.io/github/downloads/stremli/stremli/total?style=for-the-badge&color=7C9CFF&logo=android&logoColor=white)](https://github.com/stremli/stremli/releases)
+[![Stars](https://img.shields.io/github/stars/stremli/stremli?style=for-the-badge&color=7C9CFF&logo=github)](https://github.com/stremli/stremli/stargazers)
+[![Forks](https://img.shields.io/github/forks/stremli/stremli?style=for-the-badge&color=7C9CFF&logo=github)](https://github.com/stremli/stremli/network/members)
+[![Issues](https://img.shields.io/github/issues/stremli/stremli?style=for-the-badge&color=7C9CFF&logo=github)](https://github.com/stremli/stremli/issues)
+
+![Fire TV Stick](https://img.shields.io/badge/Made_for-Fire_TV_Stick-FF9900?style=for-the-badge&logo=amazon&logoColor=white)
+![1 GB ready](https://img.shields.io/badge/Runs_on-1_GB_sticks-FF9900?style=for-the-badge)
+![Android TV](https://img.shields.io/badge/Android_TV-3DDC84?style=for-the-badge&logo=android&logoColor=white)
+![Kotlin](https://img.shields.io/badge/Kotlin-7F52FF?style=for-the-badge&logo=kotlin&logoColor=white)
+![Jetpack Compose](https://img.shields.io/badge/Jetpack_Compose-4285F4?style=for-the-badge&logo=jetpackcompose&logoColor=white)
+
+<br/>
+
+<a href="https://github.com/stremli/stremli/releases/latest/download/stremli.apk">
+  <img src="https://img.shields.io/badge/⬇️_DOWNLOAD_STREMLI-7C9CFF?style=for-the-badge&logo=android&logoColor=white&labelColor=1a1a2e" alt="Download Stremli" height="42"/>
+</a>
+&nbsp;
+<a href="https://github.com/stremli/stremli/issues/new">
+  <img src="https://img.shields.io/badge/🐞_REPORT_A_BUG-E5534B?style=for-the-badge&labelColor=1a1a2e" alt="Report a bug" height="42"/>
+</a>
+&nbsp;
+<a href="https://github.com/stremli/stremli/issues/new">
+  <img src="https://img.shields.io/badge/💡_SUGGEST_A_FEATURE-3FB950?style=for-the-badge&labelColor=1a1a2e" alt="Suggest a feature" height="42"/>
+</a>
+
+<br/><br/>
+
+<a href="#made-for-fire-sticks"><b>Made for Fire Sticks</b></a> ·
+<a href="#get-it"><b>Get it</b></a> ·
+<a href="#screenshots"><b>Screenshots</b></a> ·
+<a href="#features"><b>Features</b></a> ·
+<a href="#help-make-stremli-better"><b>Contribute</b></a>
+
+<br/><br/>
+
+<img src="screenshots/home.png" alt="Stremli home screen" width="800">
+
+</div>
+
+Most streaming apps are made for phones and stretched onto your TV. Stremli is the opposite: it was designed from the first line of code for the **Amazon Fire TV Stick**, and every screen, every menu and every byte of memory is tuned for it. Even on an older 1 GB Fire Stick it stays quick and smooth, where other apps stutter and crash.
+
+Browse thousands of series and films, follow what's airing, keep your lists in sync, and watch from the couch with nothing but your remote. It's free, with no ads and no analytics.
+
+## Made for Fire Sticks
+
+- **Runs great on 1 GB sticks.** Stremli measures your stick and sizes itself to fit, so it stays smooth on the cheapest models and uses the extra room on a Fire TV Stick 4K.
+- **Tiny and light.** The whole app is about 4 MB, so it won't eat the limited storage on your stick.
+- **Nothing wasted while you browse.** Screens stay still when you do, which keeps your stick cool and responsive.
+- **Made for the Fire TV remote.** Every feature works with the D-pad. There's nothing to tap, no mouse and no keyboard hunting.
+- **Works with Alexa.** Say "Alexa, pause" or "Alexa, next" and playback follows.
+- **Plays nicely with Fire OS.** Stremli pauses if your TV disconnects, and frees up memory the moment you leave it.
+- **Updates itself.** Install it once. There's no sideloading again for every new version.
+
+Stremli also runs on other Android TV devices, but Fire Sticks come first.
 
 ## Get it
 
 **[Download the latest version](https://github.com/stremli/stremli/releases/latest/download/stremli.apk)** or see all versions on the [Releases page](https://github.com/stremli/stremli/releases/latest).
 
-On a Fire TV:
+On your Fire TV Stick:
 
 1. Install the free **Downloader** app from the Amazon Appstore.
 2. Go to **Settings → My Fire TV → Developer options** and allow Downloader to install unknown apps.
@@ -75,11 +131,7 @@ After that, Stremli updates itself. It checks once a day and asks before install
 - **Playback:** preferred source and version, speed, skip step, resume, autoplay and how intros, outros and recaps are handled.
 - **Lists and sync:** automatic list updates and how often to check for changes.
 - **Home and Schedule:** choose which rows appear, the banner, and what opens first.
-- **This TV:** updates, the video buffer with advice for your device's memory, and storage clean-up.
-
-### Built for small devices
-
-Stremli sizes its memory use to your device, doesn't animate anything while you're sitting still, and works entirely with a remote.
+- **This TV:** updates, the video buffer with advice for your stick's memory, and storage clean-up.
 
 ## Help make Stremli better
 
@@ -90,9 +142,5 @@ Stremli is open source, and it gets better with every person who pitches in.
 - **Know Kotlin or Jetpack Compose?** Pull requests are very welcome, from typo fixes to new features. If it's a big change, open an issue first so we can talk it through.
 
 To build it, open this folder in Android Studio with JDK 17 or newer, or run `./gradlew assembleDebug`.
-
-## Stay in touch
-
-If this page ever moves, Stremli finds the new location by itself. You can also follow updates on Nostr: `npub12hph5p0sr9nre9g7cq5cl5s95psyw8kudrw3kpgjqscet7zakjds0jn9te`
 
 Licences for the fonts, icons and other third-party work are in `app/src/main/assets`.
