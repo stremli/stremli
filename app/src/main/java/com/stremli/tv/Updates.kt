@@ -136,9 +136,7 @@ object Updates {
         if (status is UpdateStatus.Downloading) return
         if (Build.VERSION.SDK_INT >= 26 && !app.packageManager.canRequestPackageInstalls()) {
             status = UpdateStatus.NeedsPermission(update)
-            runCatching {
-                app.startActivity(Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:${app.packageName}")).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-            }
+            runCatching { open(context, Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:${app.packageName}"))) }
             return
         }
         status = UpdateStatus.Downloading(update, 0)
@@ -146,10 +144,7 @@ object Updates {
             try {
                 val file = withContext(Dispatchers.IO) { download(app, update) { percent -> scope.launch { status = UpdateStatus.Downloading(update, percent) } } }
                 val uri = FileProvider.getUriForFile(app, "${app.packageName}.updates", file)
-                app.startActivity(
-                    Intent(Intent.ACTION_VIEW).setDataAndType(uri, "application/vnd.android.package-archive")
-                        .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
-                )
+                open(context, Intent(Intent.ACTION_VIEW).setDataAndType(uri, "application/vnd.android.package-archive").addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION))
                 status = UpdateStatus.Available(update)
             } catch (e: IOException) {
                 Log.i("Updates", "download failed: ${e.message}")
@@ -158,6 +153,12 @@ object Updates {
                 status = UpdateStatus.Failed("This TV can't open the installer.", update)
             }
         }
+    }
+
+    /** Opened from the activity, so Back returns to the app and not to the TV's home screen. */
+    private fun open(context: Context, intent: Intent) {
+        if (context !is android.app.Activity) intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        context.startActivity(intent)
     }
 
     /** Removes a downloaded update once it has been installed. */
