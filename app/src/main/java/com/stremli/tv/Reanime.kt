@@ -1,5 +1,7 @@
 package com.stremli.tv
 
+import android.content.Context
+import android.os.SystemClock
 import android.util.Base64
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.Request
@@ -14,7 +16,7 @@ import javax.crypto.spec.IvParameterSpec
 import javax.crypto.spec.SecretKeySpec
 
 data class ReanimeSubtitle(val url: String, val label: String, val language: String, val mimeType: String, val isDefault: Boolean)
-data class ReanimeServer(val name: String, val language: String, val url: String, val subtitleType: String = "") {
+data class ReanimeServer(val name: String, val language: String, val url: String, val subtitleType: String, val providerHost: String) {
     val group: String get() = when {
         language == "dub" -> "Dubbed"
         subtitleType == "hard" || name.contains("H-SUB", true) -> "Hard subtitles"
@@ -37,14 +39,42 @@ class ReanimeSession(
 
 /** Blocking network and cryptographic work; call from an IO dispatcher. */
 object Reanime {
+    private const val HOST_RECORD = "https://raw.githubusercontent.com/stremli/stremli/main/tools/reanime-host.txt"
     private const val UA = "Mozilla/5.0 (Linux; Android 11) AppleWebKit/537.36 Chrome/131.0.0.0 Safari/537.36"
     private const val EMBED_ORIGIN = "https://flixcloud.cc/"
     private val client by lazy { Http.client.newBuilder().followRedirects(false).followSslRedirects(false).build() }
+    private lateinit var origins: Lazy<ReanimeOrigins>
+
+    /** Called on the main thread. Read the saved host only when the first lookup runs on IO. */
+    fun initialize(context: Context) {
+        if (::origins.isInitialized) return
+        origins = lazy {
+            val prefs = context.getSharedPreferences("stremli", Context.MODE_PRIVATE)
+            val saved = prefs.getString("reanimeHost", null)?.takeIf(::validPublishedHost)
+            ReanimeOrigins(saved ?: BuildConfig.REANIME_HOST, readPublishedHost = {
+                try {
+                    get(HOST_RECORD, "raw.githubusercontent.com", 256).trim().takeIf(::validPublishedHost)
+                        ?: BuildConfig.REANIME_HOST
+                } catch (_: IOException) {
+                    BuildConfig.REANIME_HOST
+                }
+            }, onWorkingHost = { prefs.edit().putString("reanimeHost", it).apply() },
+                nowMillis = SystemClock::elapsedRealtime)
+        }
+    }
 
     fun servers(animeId: Int, malId: Int?, episode: Int): List<ReanimeServer> {
         require(animeId > 0 && episode > 0 && (malId == null || malId > 0))
-        val url = "https://reanime.to/api/flix/$animeId/$episode" + (malId?.let { "?mal=$it" } ?: "")
-        val root = JSONObject(get(url, "reanime.to", 64 * 1024, "https://reanime.to/"))
+        val path = "api/flix/$animeId/$episode" + (malId?.let { "?mal=$it" } ?: "")
+        return origins.value.lookup { host -> fetchServers(host, path) }
+    }
+
+    private fun fetchServers(host: String, path: String): List<ReanimeServer> {
+        val origin = "https://$host/"
+        val body = get(origin + path, host, 64 * 1024, origin, discovery = true)
+        val root = try { JSONObject(body) } catch (e: org.json.JSONException) {
+            throw IOException("Invalid Reanime server list", e)
+        }
         if (!root.optBoolean("success")) throw IOException("Reanime did not return servers")
         val servers = root.optJSONArray("servers") ?: throw IOException("Reanime servers missing")
         if (servers.length() > 64) throw IOException("Too many servers")
@@ -56,7 +86,7 @@ object Reanime {
             val link = server.optString("dataLink")
             if (type !in listOf("sub", "dub") || name.isBlank() || name.length > 80 || !validEmbed(link)) continue
             val subType = when { server.optBoolean("hardsub") -> "hard"; server.optBoolean("softsub") -> "soft"; else -> "" }
-            result.add(ReanimeServer(name, type, link, subType))
+            result.add(ReanimeServer(name, type, link, subType, host))
         }
         return result
     }
@@ -87,7 +117,7 @@ object Reanime {
         if (server.language !in listOf("sub", "dub") || !validEmbed(server.url)) throw IOException("Invalid Reanime server")
         val embed = server.url.toHttpUrlOrNull()!!.newBuilder()
             .setQueryParameter("a", if (server.language == "dub") "1" else "0").build()
-        return resolveEmbed(embed.toString())
+        return resolveEmbed(embed.toString(), server.providerHost)
     }
 
     private fun validEmbed(link: String): Boolean {
@@ -98,8 +128,8 @@ object Reanime {
             (embed.queryParameter("v")?.toIntOrNull()?.let { it in 1..99 } == true) && embed.querySize == 1 && embed.fragment == null
     }
 
-    private fun resolveEmbed(url: String): ReanimeSession {
-        val html = get(url, "flixcloud.cc", 192 * 1024, "https://reanime.to/")
+    private fun resolveEmbed(url: String, providerHost: String): ReanimeSession {
+        val html = get(url, "flixcloud.cc", 192 * 1024, "https://$providerHost/")
         val marker = "data: [null,null,{type:\"data\",data:"
         val begin = html.indexOf(marker).let { if (it < 0) throw IOException("Player data missing") else it + marker.length }
         val data = try { JSONTokener(html.substring(begin)).nextValue() as JSONObject }
@@ -184,11 +214,18 @@ object Reanime {
             (u.host == "flixcloud.cc" || u.host.endsWith(".flixcloud.cc") || mediaCdn.matches(u.host))
     }
 
-    private fun get(url: String, host: String, limit: Int, referer: String): String {
+    private fun get(url: String, host: String, limit: Int, referer: String? = null, discovery: Boolean = false): String {
         val u = url.toHttpUrlOrNull() ?: throw IOException("Invalid URL")
         if (u.scheme != "https" || u.host != host || u.port != 443 || u.username.isNotEmpty() || u.password.isNotEmpty()) throw IOException("Unexpected host")
-        val req = Request.Builder().url(u).header("User-Agent", UA).header("Referer", referer).build()
+        val req = Request.Builder().url(u).header("User-Agent", UA).apply {
+            if (referer != null) header("Referer", referer)
+        }.build()
         return client.newCall(req).execute().use { response ->
+            if (discovery && (response.code == 301 || response.code == 308)) {
+                val target = response.header("Location")?.let(u::resolve)
+                val moved = target?.let { migrationHost(u, it) }
+                if (moved != null) throw ReanimeMove(moved)
+            }
             if (!response.isSuccessful) throw IOException("Provider HTTP ${response.code}")
             val body = response.body ?: throw IOException("Empty provider response")
             if (body.contentLength() > limit) throw IOException("Provider response too large")

@@ -132,4 +132,6 @@ Stremli is open source, and it gets better with every person who pitches in.
 
 To build it, open this folder in Android Studio with JDK 17 or newer, or run `./gradlew assembleDebug`.
 
+If Re:Anime changes domains, update [tools/reanime-host.txt](tools/reanime-host.txt) on `main` with the verified hostname. Builds that include this feature check that file when server discovery fails. They can also follow a permanent HTTPS redirect to another `reanime.<tld>` host and remember it after a successful lookup.
+
 Stremli is released under the [MIT License](LICENSE). Licences for the fonts, icons and other third-party work are in `app/src/main/assets`.

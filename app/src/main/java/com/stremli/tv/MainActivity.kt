@@ -214,6 +214,7 @@ private sealed class ReanimeStart {
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        Reanime.initialize(applicationContext)
         coil3.SingletonImageLoader.setSafe { buildImageLoader(it) }
         setContent { StremliApp() }
         // The branded window background covers app start; once Compose draws the screen it is only
@@ -2502,4 +2503,3 @@ private fun GotakuPlayer(request: GotakuRequest, session: GotakuSession, gotaku:
         }
     )
 }
-
