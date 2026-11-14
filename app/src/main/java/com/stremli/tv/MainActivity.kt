@@ -76,6 +76,7 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.util.Calendar
+import java.util.Locale
 
 /**
  * A catalog list loaded a page at a time as a row scrolls (Shows, Movies, Popular series). Only
@@ -190,8 +191,9 @@ private class ExploreList(private val catalog: Catalog, private val scope: kotli
     }
 }
 
-private data class GotakuRequest(val anime: Anime, val episode: Episode, val provider: Provider, val allowFallback: Boolean = true, val fellBack: Boolean = false, val version: String = "sub")
-private data class ReanimeRequest(val anime: Anime, val episode: Episode, val server: ReanimeServer? = null, val allowFallback: Boolean = true, val version: String = "sub", val serverName: String? = null)
+private data class GotakuRequest(val anime: Anime, val episode: Episode, val provider: Provider, val allowFallback: Boolean = true, val fellBack: Boolean = false, val version: String = "sub", val fellBackFrom: String? = null)
+private data class ReanimeRequest(val anime: Anime, val episode: Episode, val server: ReanimeServer? = null, val allowFallback: Boolean = true, val version: String = "sub", val serverName: String? = null, val fellBackFrom: String? = null)
+private data class MegaplayRequest(val anime: Anime, val episode: Episode, val allowFallback: Boolean = true, val version: String = "sub", val fellBackFrom: String? = null)
 
 /** The server picked in the player for a title. Never saved: the next session starts from the profile's preference. */
 private class ServerPick(val source: String, val version: String, val server: String?)
@@ -209,6 +211,12 @@ private sealed class ReanimeStart {
     data object Loading : ReanimeStart()
     data class Ready(val server: ReanimeServer, val session: ReanimeSession) : ReanimeStart()
     data class Failed(val message: String) : ReanimeStart()
+}
+
+private sealed class MegaplayStart {
+    data object Loading : MegaplayStart()
+    data class Ready(val session: MegaplaySession) : MegaplayStart()
+    data class Failed(val message: String) : MegaplayStart()
 }
 
 class MainActivity : ComponentActivity() {
@@ -256,7 +264,7 @@ fun Stremli(profile: Profile, switchProfile: () -> Unit) {
     val popular = shows.items
     var airing by remember { mutableStateOf<List<Anime>>(emptyList()) }
     // This profile's own data: My List, watch history and resume points, searches.
-    val preferences = remember { Profiles.prefs(context) }
+    val preferences = remember(profile.id) { Profiles.prefsFor(context, profile.id) }
     // The profile's library (status lists, custom lists) and its AniList / MyAnimeList sync.
     val sync = remember { TrackerSync.of(context, profile.id) }
     val library = sync.library
@@ -281,6 +289,7 @@ fun Stremli(profile: Profile, switchProfile: () -> Unit) {
     var detailFrom by remember { mutableStateOf("home") }
     var gotakuRequest by remember { mutableStateOf<GotakuRequest?>(null) }
     var reanimeRequest by remember { mutableStateOf<ReanimeRequest?>(null) }
+    var megaplayRequest by remember { mutableStateOf<MegaplayRequest?>(null) }
     var seriesTitles by remember { mutableStateOf<List<Anime>>(emptyList()) }
     // Search opens on the viewer's last search (kept in the saved history, so it lasts across
     // restarts and days); results only change when the viewer submits, not while typing.
@@ -302,35 +311,72 @@ fun Stremli(profile: Profile, switchProfile: () -> Unit) {
         }
     }
 
-    fun playEpisode(anime: Anime, episode: Episode, chosenSource: String? = null, server: ReanimeServer? = null, allowFallback: Boolean = true, fellBack: Boolean = false) {
+    fun playEpisode(anime: Anime, episode: Episode, chosenSource: String? = null, server: ReanimeServer? = null, allowFallback: Boolean = true, fellBack: Boolean = false, fellBackFrom: String? = null) {
         // A server picked for this title this session comes before the profile's preference.
         val pick = serverPicks[anime.id]
         val version = pick?.version ?: settings.preferredVersion
-        // Gotaku currently exposes subtitled streams only. Try a dub on Re:Anime first.
-        val source = chosenSource ?: pick?.source ?: if (version == "dub" && anime.id > 0) "reanime" else settings.preferredSource
+        val megaplay = anime.canUseMegaplay()
+        // Gotaku currently exposes subtitled streams only. Try a dub on MegaPlay first when it can serve it.
+        var source = chosenSource ?: pick?.source ?: when {
+            settings.preferredSource == "megaplay" && megaplay -> "megaplay"
+            version == "dub" && megaplay -> if (settings.preferredSource == "reanime") "reanime" else "megaplay"
+            settings.preferredSource == "megaplay" -> "gotaku"
+            else -> settings.preferredSource
+        }
+        if (source == "megaplay" && !megaplay) source = "gotaku"
+        if (source == "megaplay") {
+            android.util.Log.i("PlaybackSource", "episode ${episode.number} via megaplay ${version}; pref=${settings.preferredSource}")
+            // Nothing is written to the history here: a title only moves on the shelf once the
+            // player is actually ready, which TvPlayerScreen records against this profile.
+            megaplayRequest = MegaplayRequest(anime, episode, allowFallback, version, fellBackFrom)
+            page = "megaplay"
+            return
+        }
         if (source == "reanime" && anime.id > 0) {
-            reanimeRequest = ReanimeRequest(anime, episode, server, allowFallback, version, pick?.server)
+            reanimeRequest = ReanimeRequest(anime, episode, server, allowFallback, version, pick?.server, fellBackFrom)
             page = "reanime"
             return
         }
         val provider = providers.firstOrNull { it.name.equals("Gotaku", true) }
         if (provider == null) {
-            if (allowFallback && anime.id > 0) { reanimeRequest = ReanimeRequest(anime, episode, allowFallback = false, version = version); page = "reanime"; return }
+            // MegaPlay resolves any title with an id, so it covers what Gotaku cannot.
+            if (allowFallback && megaplay) { playEpisode(anime, episode, "megaplay", allowFallback = false, fellBackFrom = fellBackFrom ?: source); return }
             providerMessage = if (providers.isEmpty()) "Streaming sources are still loading. Try again in a moment." else "Gotaku is not available for this title."
             return
         }
-        preferences.edit()
-            .putInt("last:${anime.id}", episode.number)
-            .putLong("lastAt:${anime.id}", System.currentTimeMillis())
-            .putString("lastSource:${anime.id}", "gotaku")
-            .apply()
-        gotakuRequest = GotakuRequest(anime, episode, provider, allowFallback, fellBack, version)
+        gotakuRequest = GotakuRequest(anime, episode, provider, allowFallback, fellBack, version, fellBackFrom)
         page = "gotaku"
+    }
+
+    /** Where an episode can play next when [from] cannot, or null when no other source is left. */
+    fun alternativeSource(anime: Anime, from: String): String? {
+        val gotakuReady = providers.any { it.name.equals("Gotaku", true) }
+        return when (from) {
+            "megaplay" -> when {
+                anime.id > 0 -> "reanime"
+                gotakuReady -> "gotaku"
+                else -> null
+            }
+            "gotaku" -> if (anime.id > 0) "reanime" else null
+            "reanime" -> when {
+                gotakuReady -> "gotaku"
+                anime.canUseMegaplay() -> "megaplay"
+                else -> null
+            }
+            else -> null
+        }
+    }
+
+    /** Moves on to the next source. Only the first hop may itself fall back, so a failed chain stops. */
+    fun fallbackEpisode(anime: Anime, episode: Episode, from: String) {
+        val next = alternativeSource(anime, from) ?: return
+        playEpisode(anime, episode, next, allowFallback = from == "megaplay" && next == "reanime", fellBackFrom = from)
     }
 
     /** Plays the server picked in the player, and keeps it for this title's other episodes this session. */
     fun chooseServer(anime: Anime, episode: Episode, choice: PlayerServer) {
-        serverPicks[anime.id] = ServerPick(choice.source, choice.server?.language ?: "sub", choice.server?.name)
+        android.util.Log.i("PlaybackSource", "chose ${choice.key} for episode ${episode.number}")
+        serverPicks[anime.id] = ServerPick(choice.source, choice.version ?: choice.server?.language ?: "sub", choice.server?.name)
         playEpisode(anime, episode, choice.source, choice.server, false)
     }
 
@@ -338,7 +384,7 @@ fun Stremli(profile: Profile, switchProfile: () -> Unit) {
     fun openTitle(anime: Anime, autoPlay: Int? = null) {
         if (page == "home" || page == "search") detailFrom = page
         listsOpen = false
-        page = "detail"; selected = anime; providers = emptyList(); seriesTitles = emptyList(); gotakuRequest = null; reanimeRequest = null; providerMessage = "Finding streaming sources…"
+        page = "detail"; selected = anime; providers = emptyList(); seriesTitles = emptyList(); gotakuRequest = null; reanimeRequest = null; megaplayRequest = null; providerMessage = "Finding streaming sources…"
         detailLoading = true
         scope.launch {
             try {
@@ -350,9 +396,10 @@ fun Stremli(profile: Profile, switchProfile: () -> Unit) {
                 seriesTitles = related
                 val mal = full.mal
                 if (mal == null) {
-                    providerMessage = "Gotaku isn’t available for this title yet."
+                    // No MAL id means no Kuroiru list and no Gotaku, but MegaPlay only needs AniList.
+                    providerMessage = if (full.canUseMegaplay()) "Pick an episode to play it here." else "No streaming sources are available for this title."
                     val episode = autoPlay?.let { n -> full.episodes.firstOrNull { it.number == n } }
-                    if (episode != null && full.id > 0 && page == "detail") playEpisode(full, episode)
+                    if (episode != null && full.canUseMegaplay() && page == "detail") playEpisode(full, episode)
                 }
                 else {
                     try {
@@ -368,13 +415,13 @@ fun Stremli(profile: Profile, switchProfile: () -> Unit) {
                             gotaku?.let { launch(Dispatchers.IO) { GotakuTitles.prefetch(it, current.id) } }
                             providerMessage = if (found.isEmpty()) "No streaming sources were returned." else "Pick an episode to play it here, or open a provider's page."
                             val episode = autoPlay?.let { n -> current.episodes.firstOrNull { it.number == n } }
-                            if (episode != null && (gotaku != null || current.id > 0) && page == "detail") playEpisode(current, episode)
+                            if (episode != null && (gotaku != null || current.canUseMegaplay()) && page == "detail") playEpisode(current, episode)
                         }
                     } catch (e: Exception) {
                         if (selected?.id == anime.id) {
                             providerMessage = "Could not load streaming sources. Check your connection and try again."
                             val episode = autoPlay?.let { n -> full.episodes.firstOrNull { it.number == n } }
-                            if (episode != null && full.id > 0 && page == "detail") playEpisode(full, episode)
+                            if (episode != null && full.canUseMegaplay() && page == "detail") playEpisode(full, episode)
                         }
                     }
                 }
@@ -464,7 +511,7 @@ fun Stremli(profile: Profile, switchProfile: () -> Unit) {
         lifecycle.lifecycle.repeatOnLifecycle(androidx.lifecycle.Lifecycle.State.STARTED) {
             while (true) {
                 delay(TrackerSync.OUTSIDE_TICK_MS)
-                if (page != "gotaku" && page != "reanime") sync.pullIfDue()
+                if (!isPlaybackPage(page)) sync.pullIfDue()
             }
         }
     }
@@ -494,7 +541,7 @@ fun Stremli(profile: Profile, switchProfile: () -> Unit) {
         if (q.isNotBlank()) { history = rememberSearch(preferences, history, q) }
     }
     BackHandler(enabled = page != "home") {
-        page = when (page) { "gotaku", "reanime" -> "detail"; "detail" -> detailFrom; else -> "home" }
+        page = when (page) { "gotaku", "reanime", "megaplay" -> "detail"; "detail" -> detailFrom; else -> "home" }
     }
     @Composable
     fun PageContent(shown: String) {
@@ -541,8 +588,11 @@ fun Stremli(profile: Profile, switchProfile: () -> Unit) {
                         })
                     }
                 } }
-                "gotaku" -> gotakuRequest?.let { request -> GotakuPlayback(request, providers.firstOrNull { it.name.equals("Gotaku", true) }, onBack = { page = "detail" }, onPlayEpisode = { playEpisode(request.anime, it) }, onChooseServer = { choice -> chooseServer(request.anime, request.episode, choice) }, onFallback = { playEpisode(request.anime, request.episode, "reanime", allowFallback = false) }) }
-                "reanime" -> reanimeRequest?.let { request -> ReanimePlayback(request, providers.firstOrNull { it.name.equals("Gotaku", true) }, onBack = { page = "detail" }, onPlayEpisode = { playEpisode(request.anime, it) }, onChooseServer = { choice -> chooseServer(request.anime, request.episode, choice) }, onFallback = { playEpisode(request.anime, request.episode, "gotaku", allowFallback = false, fellBack = true) }) }
+                // A player only gets a failure handler when another source can take over, so a
+                // dead end shows its error instead of spinning on a page change.
+                "megaplay" -> megaplayRequest?.let { request -> MegaplayPlayback(request, providers.firstOrNull { it.name.equals("Gotaku", true) }, onBack = { page = "detail" }, onPlayEpisode = { playEpisode(request.anime, it) }, onChooseServer = { choice -> chooseServer(request.anime, request.episode, choice) }, onFallback = if (alternativeSource(request.anime, "megaplay") != null) { { fallbackEpisode(request.anime, request.episode, "megaplay") } } else null) }
+                "gotaku" -> gotakuRequest?.let { request -> GotakuPlayback(request, providers.firstOrNull { it.name.equals("Gotaku", true) }, onBack = { page = "detail" }, onPlayEpisode = { playEpisode(request.anime, it) }, onChooseServer = { choice -> chooseServer(request.anime, request.episode, choice) }, onFallback = if (alternativeSource(request.anime, "gotaku") != null) { { fallbackEpisode(request.anime, request.episode, "gotaku") } } else null) }
+                "reanime" -> reanimeRequest?.let { request -> ReanimePlayback(request, providers.firstOrNull { it.name.equals("Gotaku", true) }, onBack = { page = "detail" }, onPlayEpisode = { playEpisode(request.anime, it) }, onChooseServer = { choice -> chooseServer(request.anime, request.episode, choice) }, onFallback = if (alternativeSource(request.anime, "reanime") != null) { { fallbackEpisode(request.anime, request.episode, "reanime") } } else null) }
         }
     }
     StremliTheme {
@@ -603,17 +653,17 @@ private suspend fun loadContinue(catalog: Catalog, prefs: android.content.Shared
     val local = started.mapNotNull { id ->
         val anime = catalog.detail(id) ?: return@mapNotNull null
         val last = all["last:$id"] as? Int ?: return@mapNotNull null
-        val source = (all["lastSource:$id"] as? String).takeIf { it == "reanime" } ?: "gotaku"
+        val source = (all["lastSource:$id"] as? String).takeIf { it == "reanime" || it == "megaplay" } ?: "gotaku"
         val key = watchPositionKey(source, id, last, all["lastServer:$id"] as? String)
-        val position = all["resume:$key"] as? Long ?: 0L
+        val position = all["resume:$key"] as? Long
         val duration = all["dur:$key"] as? Long ?: 0L
         val current = anime.airedEpisode(last, now)
         // Progress synced from elsewhere can be past the episode saved here.
         val synced = library.entry(id)?.takeIf { it.status != ListStatus.COMPLETED }?.progress ?: 0
-        if (position > 0L && current != null && last > synced) {
+        if (position != null && current != null && last > synced) {
             ContinueItem(anime, current, if (duration > 0L) (position.toFloat() / duration).coerceIn(0f, 1f) else null, upNext = false)
         } else {
-            // Finished (or never saved): offer the next episode, if there is one (the library may
+            // Finished (or legacy history without a resume point): offer the next episode, if there is one (the library may
             // know of episodes watched elsewhere since).
             val seen = maxOf(last, synced)
             val next = anime.airedEpisode(seen + 1, now) ?: return@mapNotNull null
@@ -646,11 +696,26 @@ private fun Anime.airedEpisode(number: Int, now: Long): Episode? {
     return if (aired) Episode(number, "", "", "", "") else null
 }
 
+/**
+ * The next episode that has already aired. Autoplay, Next and the MediaSession commands use it, so
+ * they never offer an episode the picker is still hiding.
+ */
+private fun Anime.nextAiredEpisode(after: Int): Episode? {
+    val now = System.currentTimeMillis()
+    return episodes.filter { it.number > after && it.airsAfter(now) == 0L }.minByOrNull { it.number }
+}
+
+/** MegaPlay resolves from either id: the AniList one, or MAL for the local (negative id) titles. */
+private fun Anime.canUseMegaplay(): Boolean = id > 0 || mal != null
+
+/** A page that owns an ExoPlayer. Background work must not compete with the video there. */
+private fun isPlaybackPage(page: String): Boolean = page == "gotaku" || page == "reanime" || page == "megaplay"
+
 /** Re:Anime appends this to every subtitle label, as in "English (Track 2 (ENG))". */
 private val TRACK_NUMBER = Regex("""\s*\(Track \d+ \(\w+\)\)$""")
 
 internal fun watchPositionKey(source: String, animeId: Int, episode: Int, server: String?): String =
-    if (source == "reanime" && !server.isNullOrBlank()) "$source:$animeId:$episode:$server" else "$source:$animeId:$episode"
+    if ((source == "reanime" || source == "megaplay") && !server.isNullOrBlank()) "$source:$animeId:$episode:$server" else "$source:$animeId:$episode"
 
 private fun ago(time: Long): String {
     if (time <= 0L) return "new"
@@ -1902,7 +1967,7 @@ private fun Detail(
     val art by animateFloatAsState(if (scrolled) .3f else 1f, MaterialTheme.motionScheme.slowEffectsSpec(), label = "key art")
     val margin = Modifier.padding(horizontal = Tokens.screenH)
     val fallbackStill = anime.banner.ifBlank { anime.poster }
-    val lastServer = Profiles.prefsFor(context, Profiles.currentId(context)).getString("lastServer:${anime.id}", null)
+    val lastServer = Profiles.prefsFor(context, LocalSettings.current.profileId).getString("lastServer:${anime.id}", null)
     fun positionKey(episode: Episode) = watchPositionKey(selectedSource, anime.id, episode.number, lastServer)
     fun progress(episode: Episode) = progressOf(context, positionKey(episode))
     fun showEpisodes() {
@@ -2275,8 +2340,33 @@ private fun gotakuMessage(episode: Int, throwable: Throwable): String {
     }
 }
 
+/** Turns a MegaPlay failure into something a viewer can act on. */
+private fun megaplayMessage(episode: Int, throwable: Throwable): String {
+    val messages = buildList {
+        var current: Throwable? = throwable
+        while (current != null && size < 8) {
+            current.message?.takeIf { it.isNotBlank() }?.let(::add)
+            current = current.cause
+        }
+    }
+    val raw = messages.firstOrNull { message ->
+        listOf("Episode", "MegaPlay", "HTTP", "stream", "title").any { message.contains(it, true) }
+    } ?: messages.firstOrNull().orEmpty()
+    return when {
+        raw.contains("unavailable", true) || raw.contains("cannot tell which title", true) ->
+            "Episode $episode is unavailable on MegaPlay."
+        raw.contains("HTTP 401") || raw.contains("HTTP 403") || raw.contains("refused the request", true) ->
+            "MegaPlay refused the playback session. Try again."
+        raw.contains("Could not reach", true) || raw.contains("Unable to connect", true) ->
+            "Could not reach MegaPlay. Check your connection and try again."
+        raw.contains("changed", true) || raw.contains("unsupported", true) -> "MegaPlay changed its playback format. This episode cannot play right now."
+        raw.isBlank() -> "Episode $episode could not be played."
+        else -> raw
+    }
+}
+
 @Composable
-private fun GotakuPlayback(request: GotakuRequest, gotaku: Provider?, onBack: () -> Unit, onPlayEpisode: (Episode) -> Unit, onChooseServer: (PlayerServer) -> Unit, onFallback: () -> Unit) {
+private fun GotakuPlayback(request: GotakuRequest, gotaku: Provider?, onBack: () -> Unit, onPlayEpisode: (Episode) -> Unit, onChooseServer: (PlayerServer) -> Unit, onFallback: (() -> Unit)?) {
     val appContext = LocalContext.current.applicationContext
     LaunchedEffect(Unit) { releaseImagesForPlayback(appContext) }
     var attempt by remember(request) { mutableStateOf(0) }
@@ -2291,13 +2381,12 @@ private fun GotakuPlayback(request: GotakuRequest, gotaku: Provider?, onBack: ()
                 GotakuStart.Failed(gotakuMessage(request.episode.number, e))
             }
         }
-        state = result
-        if (result is GotakuStart.Failed && request.allowFallback && request.anime.id > 0) onFallback()
+        // Hand over to the next source rather than show an error it is about to replace.
+        if (result is GotakuStart.Failed && request.allowFallback && onFallback != null) onFallback() else state = result
     }
     when (val current = state) {
-        is GotakuStart.Loading -> PlaybackStatus(request, "Starting episode ${request.episode.number}", "Opening the Gotaku playback session…")
-        is GotakuStart.Failed -> PlaybackStatus(
-            request,
+        is GotakuStart.Loading -> PlaybackStatus(request.anime, request.episode, "Starting episode ${request.episode.number}", "Opening the Gotaku playback session…")
+        is GotakuStart.Failed -> PlaybackStatus(request.anime, request.episode,
             when {
                 current.message.contains("unavailable", true) || current.message.contains("no subtitled", true) -> "Episode unavailable"
                 current.message.contains("changed its playback format", true) -> "Source error"
@@ -2312,11 +2401,116 @@ private fun GotakuPlayback(request: GotakuRequest, gotaku: Provider?, onBack: ()
 }
 
 @Composable
-private fun ReanimePlayback(request: ReanimeRequest, gotaku: Provider?, onBack: () -> Unit, onPlayEpisode: (Episode) -> Unit, onChooseServer: (PlayerServer) -> Unit, onFallback: () -> Unit) {
-    val context = LocalContext.current.applicationContext
-    val prefs = remember { Profiles.prefsFor(context, Profiles.currentId(context)) }
+private fun MegaplayPlayback(request: MegaplayRequest, gotaku: Provider?, onBack: () -> Unit, onPlayEpisode: (Episode) -> Unit, onChooseServer: (PlayerServer) -> Unit, onFallback: (() -> Unit)?) {
+    val appContext = LocalContext.current.applicationContext
+    LaunchedEffect(Unit) { releaseImagesForPlayback(appContext) }
+    var attempt by remember(request) { mutableIntStateOf(0) }
+    var state by remember(request, attempt) { mutableStateOf<MegaplayStart>(MegaplayStart.Loading) }
+    LaunchedEffect(request, attempt) {
+        state = MegaplayStart.Loading
+        val result = withContext(Dispatchers.IO) {
+            try {
+                val session = Megaplay.resolve(request.anime.id, request.anime.mal, request.episode.number, request.version)
+                android.util.Log.i("MegaplayPlayback", "episode ${request.episode.number} ${session.language} on ${android.net.Uri.parse(session.sourceUrl).host}, ${session.subtitles.size} tracks")
+                MegaplayStart.Ready(session)
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                android.util.Log.w("MegaplayPlayback", "episode ${request.episode.number}: ${e.javaClass.simpleName}: ${e.message}")
+                MegaplayStart.Failed(megaplayMessage(request.episode.number, e))
+            }
+        }
+        // Hand over to the next source rather than show an error it is about to replace.
+        if (result is MegaplayStart.Failed && request.allowFallback && onFallback != null) onFallback() else state = result
+    }
+    when (val current = state) {
+        is MegaplayStart.Loading -> PlaybackStatus(request.anime, request.episode, "Starting episode ${request.episode.number}", "Opening the MegaPlay stream…")
+        is MegaplayStart.Failed -> PlaybackStatus(request.anime, request.episode,
+            when {
+                current.message.contains("unavailable", true) -> "Episode unavailable"
+                current.message.contains("changed its playback format", true) -> "Source error"
+                else -> "Playback unavailable"
+            },
+            current.message,
+            onRetry = { attempt++ },
+            onBack = onBack
+        )
+        is MegaplayStart.Ready -> MegaplayPlayer(request, current.session, gotaku, onBack = onBack, onRetry = { attempt++ }, onPlayEpisode = onPlayEpisode, onChooseServer = onChooseServer, onFallback = onFallback)
+    }
+}
+
+@androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
+@Composable
+private fun MegaplayPlayer(request: MegaplayRequest, session: MegaplaySession, gotaku: Provider?, onBack: () -> Unit, onRetry: () -> Unit, onPlayEpisode: (Episode) -> Unit, onChooseServer: (PlayerServer) -> Unit, onFallback: (() -> Unit)?) {
+    val context = LocalContext.current
     val settings = LocalSettings.current
-    val statusRequest = remember(request) { GotakuRequest(request.anime, request.episode, Provider("Re:Anime", "", false)) }
+    val number = request.episode.number
+    val dubbed = session.language == "dub"
+    val nextEpisode = remember(request) { request.anime.nextAiredEpisode(number) }
+    val exoPlayer = remember(session) {
+        buildTvPlayer(context, largeSegments = true).apply {
+            // A dub needs only forced subtitles (signs, foreign lines); full ones stay in the panel.
+            // The provider's own default for a subtitled cut is often the forced track, which would
+            // leave a viewer reading signs only, so a full track of the preferred language wins.
+            val defaultTrack = if (dubbed) -1 else {
+                val preferred = listOf("en", Locale.getDefault().language)
+                session.subtitles.indices.firstOrNull { i ->
+                    val track = session.subtitles[i]
+                    !track.label.contains("forced", true) && track.language in preferred
+                } ?: session.subtitles.indexOfFirst { it.isDefault }
+            }
+            val subtitles = session.subtitles.mapIndexed { index, subtitle ->
+                val forced = subtitle.label.contains("forced", true)
+                val flags = when {
+                    dubbed -> if (forced) C.SELECTION_FLAG_FORCED else 0
+                    index == defaultTrack -> C.SELECTION_FLAG_DEFAULT
+                    else -> 0
+                }
+                MediaItem.SubtitleConfiguration.Builder(Uri.parse(subtitle.url))
+                    .setLabel(subtitle.label.replace(TRACK_NUMBER, "")).setLanguage(subtitle.language).setMimeType(subtitle.mimeType)
+                    .setSelectionFlags(flags).build()
+            }
+            val item = MediaItem.Builder().setUri(session.sourceUrl).setMimeType(androidx.media3.common.MimeTypes.APPLICATION_M3U8).setSubtitleConfigurations(subtitles)
+                .setMediaMetadata(MediaMetadata.Builder().setTitle(listOf("Episode $number", request.episode.title).filter { it.isNotBlank() }.joinToString(" · ")).setArtist(request.anime.title).build())
+                .build()
+            trackSelectionParameters = trackSelectionParameters.buildUpon().setPreferredAudioLanguage(if (dubbed) "en" else "ja").apply {
+                if (dubbed) setPreferredTextLanguages().setSelectUndeterminedTextLanguage(false)
+            }.build()
+            setMediaSource(
+                // The default factory merges external captions with the HLS media source.
+                DefaultMediaSourceFactory(MegaplayDataSource.Factory())
+                    .setLoadErrorHandlingPolicy(MegaplayLoadErrorPolicy())
+                    .createMediaSource(item)
+            )
+            prepare()
+            playWhenReady = true
+        }
+    }
+    var skips by remember(session) { mutableStateOf(session.skips) }
+    LaunchedEffect(session) { skips = session.skips + runCatching { Catalog.shared(context).skipTimes(request.anime, number) }.getOrDefault(emptyList()) }
+    val label = if (dubbed) "MegaPlay · dub" else "MegaPlay"
+    TvPlayerScreen(
+        player = exoPlayer, skips = skips, title = request.anime.title, episodeLabel = "Episode $number", episodeTitle = request.episode.title,
+        resumeKey = watchPositionKey("megaplay", request.anime.id, number, session.language),
+        noSubtitlesNote = if (session.burnedIn) "This episode's subtitles are burned into the video, so there is nothing to switch." else "No selectable subtitle tracks are available for this stream.",
+        describeError = { megaplayMessage(number, it) }, onRetry = onRetry, onBack = onBack,
+        anime = request.anime, episode = request.episode, gotaku = gotaku, megaplay = request.anime.canUseMegaplay(),
+        currentServer = PlayerServer("megaplay", label, if (dubbed) "Dubbed" else "Subtitled", version = session.language),
+        onChooseServer = onChooseServer, onChooseEpisode = onPlayEpisode,
+        initialNotice = request.fellBackFrom?.let { "Switched to MegaPlay" },
+        onStartFailure = if (request.allowFallback) onFallback else null,
+        onNextEpisode = nextEpisode?.let { next -> { onPlayEpisode(next) } },
+        onWatched = {
+            val appContext = context.applicationContext
+            if (UserSettings.of(appContext, settings.profileId).autoTrack) TrackerSync.background { TrackerSync.of(appContext, settings.profileId).library.episodeWatched(request.anime, number) }
+        }
+    )
+}
+
+@Composable
+private fun ReanimePlayback(request: ReanimeRequest, gotaku: Provider?, onBack: () -> Unit, onPlayEpisode: (Episode) -> Unit, onChooseServer: (PlayerServer) -> Unit, onFallback: (() -> Unit)?) {
+    val context = LocalContext.current.applicationContext
+    val settings = LocalSettings.current
     LaunchedEffect(Unit) { releaseImagesForPlayback(context) }
     var attempt by remember(request) { mutableIntStateOf(0) }
     var state by remember(request, attempt) { mutableStateOf<ReanimeStart>(ReanimeStart.Loading) }
@@ -2337,7 +2531,7 @@ private fun ReanimePlayback(request: ReanimeRequest, gotaku: Provider?, onBack: 
                 }
                 // Prefer another source with the requested language before changing language.
                 // Gotaku currently has subtitles only; if both are fallbacks, honor source order.
-                if (resolved == null && request.server == null && request.allowFallback && gotaku != null &&
+                if (resolved == null && request.server == null && request.allowFallback && onFallback != null &&
                     (request.version == "sub" || settings.preferredSource == "gotaku"))
                     throw failure ?: java.io.IOException("Preferred version unavailable")
                 if (resolved == null) for (server in other) {
@@ -2347,31 +2541,28 @@ private fun ReanimePlayback(request: ReanimeRequest, gotaku: Provider?, onBack: 
                 }
                 resolved ?: throw failure ?: java.io.IOException("No servers are available for this episode.")
             }
-            val server = ready.server
-            prefs.edit().putString("lastServer:${request.anime.id}", "${server.name}:${server.language}")
-                .putString("lastSource:${request.anime.id}", "reanime").putInt("last:${request.anime.id}", request.episode.number)
-                .putLong("lastAt:${request.anime.id}", System.currentTimeMillis()).apply()
             state = ready
         } catch (e: kotlinx.coroutines.CancellationException) { throw e }
         catch (e: Exception) {
-            if (request.allowFallback && gotaku != null) onFallback()
+            // Hand over to the next source rather than show an error it is about to replace.
+            if (request.allowFallback && onFallback != null) onFallback()
             else state = ReanimeStart.Failed(e.message ?: "This server could not start playback.")
         }
     }
     when (val current = state) {
-        ReanimeStart.Loading -> PlaybackStatus(statusRequest, "Starting episode ${request.episode.number}", "Finding an available server…")
-        is ReanimeStart.Failed -> PlaybackStatus(statusRequest, "Playback unavailable", current.message, onRetry = { attempt++ }, onBack = onBack)
+        ReanimeStart.Loading -> PlaybackStatus(request.anime, request.episode, "Starting episode ${request.episode.number}", "Finding an available server…")
+        is ReanimeStart.Failed -> PlaybackStatus(request.anime, request.episode, "Playback unavailable", current.message, onRetry = { attempt++ }, onBack = onBack)
         is ReanimeStart.Ready -> ReanimePlayer(request, current.server, current.session, gotaku, onBack = onBack, onRetry = { attempt++ }, onPlayEpisode = onPlayEpisode, onChooseServer = onChooseServer, onFallback = onFallback)
     }
 }
 
 @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
 @Composable
-private fun ReanimePlayer(request: ReanimeRequest, server: ReanimeServer, session: ReanimeSession, gotaku: Provider?, onBack: () -> Unit, onRetry: () -> Unit, onPlayEpisode: (Episode) -> Unit, onChooseServer: (PlayerServer) -> Unit, onFallback: () -> Unit) {
+private fun ReanimePlayer(request: ReanimeRequest, server: ReanimeServer, session: ReanimeSession, gotaku: Provider?, onBack: () -> Unit, onRetry: () -> Unit, onPlayEpisode: (Episode) -> Unit, onChooseServer: (PlayerServer) -> Unit, onFallback: (() -> Unit)?) {
     val context = LocalContext.current
     val settings = LocalSettings.current
     val number = request.episode.number
-    val nextEpisode = remember(request) { request.anime.episodes.filter { it.number > number }.minByOrNull { it.number } }
+    val nextEpisode = remember(request) { request.anime.nextAiredEpisode(number) }
     val exoPlayer = remember(session) {
         buildTvPlayer(context, largeSegments = true).apply {
             // A dub needs only forced subtitles (signs, foreign lines); full ones stay in the panel.
@@ -2399,39 +2590,42 @@ private fun ReanimePlayer(request: ReanimeRequest, server: ReanimeServer, sessio
         player = exoPlayer, skips = skips, title = request.anime.title, episodeLabel = "Episode $number", episodeTitle = request.episode.title,
         resumeKey = watchPositionKey("reanime", request.anime.id, number, "${server.name}:${server.language}"), noSubtitlesNote = if (Reanime.subtitleKind(server, session) == "Hard subtitles") "This episode's subtitles are burned into the video, so there is nothing to switch." else "No selectable subtitle tracks are available for this server.",
         describeError = { it.message ?: "Playback could not continue." }, onRetry = onRetry, onBack = onBack,
-        anime = request.anime, episode = request.episode, gotaku = gotaku,
+        anime = request.anime, episode = request.episode, gotaku = gotaku, megaplay = request.anime.canUseMegaplay(),
         currentServer = PlayerServer("reanime", "Re:Anime · ${server.name}", server.group, server, Reanime.subtitleKind(server, session)), onChooseServer = onChooseServer, onChooseEpisode = onPlayEpisode,
-        initialNotice = if (request.server == null && server.language != request.version) "Preferred version unavailable · Playing ${if (server.language == "dub") "dubbed" else "subtitled"}" else null,
-        onStartFailure = if (request.allowFallback && gotaku != null) onFallback else null,
+        initialNotice = when {
+            request.fellBackFrom != null && server.language == request.version -> "Switched to Re:Anime"
+            request.server == null && server.language != request.version -> "Preferred version unavailable · Playing ${if (server.language == "dub") "dubbed" else "subtitled"}"
+            else -> null
+        },
+        onStartFailure = if (request.allowFallback) onFallback else null,
         onNextEpisode = nextEpisode?.let { next -> { onPlayEpisode(next) } },
         onWatched = {
             val appContext = context.applicationContext
-            val profileId = Profiles.currentId(appContext)
-            if (UserSettings.of(appContext, profileId).autoTrack) TrackerSync.background { TrackerSync.of(appContext, profileId).library.episodeWatched(request.anime, number) }
+            if (UserSettings.of(appContext, settings.profileId).autoTrack) TrackerSync.background { TrackerSync.of(appContext, settings.profileId).library.episodeWatched(request.anime, number) }
         }
     )
 }
 
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
-private fun PlaybackStatus(request: GotakuRequest, title: String, message: String, onRetry: (() -> Unit)? = null, onBack: (() -> Unit)? = null) {
+private fun PlaybackStatus(anime: Anime, episode: Episode, title: String, message: String, onRetry: (() -> Unit)? = null, onBack: (() -> Unit)? = null) {
     val c = MaterialTheme.colorScheme
     val firstAction = remember { FocusRequester() }
     val failed = onRetry != null || onBack != null
     LaunchedEffect(title) { if (failed) runCatching { firstAction.requestFocus() } }
     Box(Modifier.fillMaxSize().background(c.surface)) {
-        Backdrop(request.anime.banner.ifBlank { request.anime.poster }, Modifier.align(Alignment.TopEnd), alpha = .35f)
+        Backdrop(anime.banner.ifBlank { anime.poster }, Modifier.align(Alignment.TopEnd), alpha = .35f)
         Column(Modifier.fillMaxSize().padding(Tokens.screenH), verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally) {
             if (!failed) ContainedLoadingIndicator(Modifier.size(84.dp))
             else Box(Modifier.size(84.dp).background(c.errorContainer, MaterialShapes.Cookie9Sided.toShape()), contentAlignment = Alignment.Center) {
                 SymIcon(R.drawable.sym_error, null, Modifier.size(40.dp), tint = c.onErrorContainer)
             }
             Spacer(Modifier.height(Tokens.gapXl))
-            Text("Episode ${request.episode.number}", style = MaterialTheme.typography.labelLargeEmphasized, color = c.primary)
+            Text("Episode ${episode.number}", style = MaterialTheme.typography.labelLargeEmphasized, color = c.primary)
             Spacer(Modifier.height(6.dp))
             Text(title, style = MaterialTheme.typography.headlineMediumEmphasized, color = c.onSurface, textAlign = TextAlign.Center)
             Spacer(Modifier.height(4.dp))
-            Text(request.anime.title, style = MaterialTheme.typography.titleMedium, color = c.onSurfaceVariant, textAlign = TextAlign.Center)
+            Text(anime.title, style = MaterialTheme.typography.titleMedium, color = c.onSurfaceVariant, textAlign = TextAlign.Center)
             Spacer(Modifier.height(Tokens.gapMd))
             Text(message, style = MaterialTheme.typography.bodyLarge, color = c.onSurfaceVariant, textAlign = TextAlign.Center, modifier = Modifier.widthIn(max = 640.dp))
             if (failed) {
@@ -2447,11 +2641,11 @@ private fun PlaybackStatus(request: GotakuRequest, title: String, message: Strin
 
 @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
 @Composable
-private fun GotakuPlayer(request: GotakuRequest, session: GotakuSession, gotaku: Provider?, onBack: () -> Unit, onRetry: () -> Unit, onPlayEpisode: (Episode) -> Unit, onChooseServer: (PlayerServer) -> Unit, onFallback: () -> Unit) {
+private fun GotakuPlayer(request: GotakuRequest, session: GotakuSession, gotaku: Provider?, onBack: () -> Unit, onRetry: () -> Unit, onPlayEpisode: (Episode) -> Unit, onChooseServer: (PlayerServer) -> Unit, onFallback: (() -> Unit)?) {
     val context = LocalContext.current
     val settings = LocalSettings.current
     val number = request.episode.number
-    val nextEpisode = remember(request) { request.anime.episodes.filter { it.number > number }.minByOrNull { it.number } }
+    val nextEpisode = remember(request) { request.anime.nextAiredEpisode(number) }
     val exoPlayer = remember(session) {
         buildTvPlayer(context).apply {
             val item = MediaItem.Builder()
@@ -2490,16 +2684,16 @@ private fun GotakuPlayer(request: GotakuRequest, session: GotakuSession, gotaku:
         describeError = { gotakuMessage(number, it) },
         onRetry = onRetry,
         onBack = onBack,
-        anime = request.anime, episode = request.episode, gotaku = gotaku,
+        anime = request.anime, episode = request.episode, gotaku = gotaku, megaplay = request.anime.canUseMegaplay(),
         currentServer = PlayerServer("gotaku", "Gotaku", "Subtitled", detail = if (session.subtitleType == "hard_sub") "Hard subtitles" else "Soft subtitles"), onChooseServer = onChooseServer, onChooseEpisode = onPlayEpisode,
-        initialNotice = if ((request.allowFallback || request.fellBack) && request.version == "dub") "Dub unavailable · Playing subtitled" else null,
-        onStartFailure = if (request.allowFallback && request.anime.id > 0) onFallback else null,
+        initialNotice = if (request.fellBackFrom != null) "Switched to Gotaku" else if ((request.allowFallback || request.fellBack) && request.version == "dub") "Dub unavailable · Playing subtitled" else null,
+        onStartFailure = if (request.allowFallback) onFallback else null,
         onNextEpisode = nextEpisode?.let { next -> { onPlayEpisode(next) } },
         // Finishing an episode moves the library (and AniList / MyAnimeList) forward.
         onWatched = {
             val appContext = context.applicationContext
-            val profileId = Profiles.currentId(appContext)
-            if (UserSettings.of(appContext, profileId).autoTrack) TrackerSync.background { TrackerSync.of(appContext, profileId).library.episodeWatched(request.anime, number) }
+            if (UserSettings.of(appContext, settings.profileId).autoTrack) TrackerSync.background { TrackerSync.of(appContext, settings.profileId).library.episodeWatched(request.anime, number) }
         }
     )
 }
+

@@ -76,6 +76,7 @@ import androidx.media3.ui.PlayerView
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import java.io.IOException
 import java.util.Locale
 
 /** Left/Right presses are added up and applied this long after the last press (Flixclusive uses 2.5 s). */
@@ -92,7 +93,18 @@ private enum class PlayerPanel { None, Quality, AudioSubtitles, Speed, Servers, 
  * A place an episode can play from. [group] only uses what is known before playing, so servers keep
  * their place in the list; [detail] is what playing it revealed, such as how its subtitles are carried.
  */
-data class PlayerServer(val source: String, val label: String, val group: String, val server: ReanimeServer? = null, val detail: String? = null)
+data class PlayerServer(val source: String, val label: String, val group: String, val server: ReanimeServer? = null, val detail: String? = null, val version: String? = null) {
+    /** Kept compatible with the existing per-server and per-cut history entries. */
+    val resumeVariant: String? get() = server?.let { "${it.name}:${it.language}" } ?: version
+    val key: String get() = resumeVariant?.let { "$source:$it" } ?: source
+
+    fun resumeKey(animeId: Int, episode: Int): String = watchPositionKey(source, animeId, episode, resumeVariant)
+
+    /** The two MegaPlay cuts can have different timing. Reopen each at its own saved position. */
+    fun handoffResumeKey(current: PlayerServer, animeId: Int, episode: Int): String? =
+        if (current.key == key || (source == "megaplay" && current.source == source)) null
+        else resumeKey(animeId, episode)
+}
 
 private class TrackOption(val label: String, val selected: Boolean, val supporting: String? = null, val apply: () -> Unit)
 
@@ -123,6 +135,8 @@ fun TvPlayerScreen(
     anime: Anime,
     episode: Episode,
     gotaku: Provider?,
+    /** MegaPlay can serve this title, so its subtitle and dub entries join the server list. */
+    megaplay: Boolean = false,
     currentServer: PlayerServer,
     onChooseServer: (PlayerServer) -> Unit,
     onChooseEpisode: (Episode) -> Unit,
@@ -137,9 +151,10 @@ fun TvPlayerScreen(
 ) {
     val context = LocalContext.current
     val c = MaterialTheme.colorScheme
-    val prefs = remember { Profiles.prefs(context) }
     val settings = LocalSettings.current
+    val prefs = remember(settings) { Profiles.prefsFor(context, settings.profileId) }
     val currentDescribeError by rememberUpdatedState(describeError)
+    val currentStartFailure by rememberUpdatedState(onStartFailure)
     val currentNextEpisode by rememberUpdatedState(onNextEpisode)
     val currentWatched by rememberUpdatedState(onWatched)
     var watchedSent by remember(player) { mutableStateOf(false) }
@@ -164,6 +179,10 @@ fun TvPlayerScreen(
         serversLoading = true
         serverError = false
         val options = mutableListOf<PlayerServer>()
+        if (megaplay) {
+            options.add(PlayerServer("megaplay", "MegaPlay", "Subtitled", version = "sub"))
+            options.add(PlayerServer("megaplay", "MegaPlay · dub", "Dubbed", version = "dub"))
+        }
         if (gotaku != null) options.add(PlayerServer("gotaku", "Gotaku", "Subtitled"))
         if (anime.id > 0) {
             try {
@@ -176,11 +195,16 @@ fun TvPlayerScreen(
         serversLoading = false
         // One at a time, so the video keeps the connection. Closing the panel stops this.
         for (option in serverOptions) {
-            if (option.source == currentServer.source && option.server == currentServer.server) continue
+            if (option.key == currentServer.key) continue
             val info = try {
                 withContext(Dispatchers.IO) {
-                    ServerInfoCache.get("${anime.id}:${episode.number}:${option.source}:${option.server?.name}:${option.server?.language}") {
-                        option.server?.let(Reanime::info) ?: GotakuSession.info(requireNotNull(gotaku), anime.id, episode.number)
+                    ServerInfoCache.get("${anime.id}:${episode.number}:${option.key}") {
+                        when {
+                            option.source == "megaplay" -> Megaplay.info(anime.id, anime.mal, episode.number, option.version ?: "sub")
+                            option.server != null -> Reanime.info(option.server)
+                            gotaku != null -> GotakuSession.info(gotaku, anime.id, episode.number)
+                            else -> throw IOException("No source for this server")
+                        }
                     }
                 }
             } catch (e: kotlinx.coroutines.CancellationException) { throw e }
@@ -290,7 +314,7 @@ fun TvPlayerScreen(
     LaunchedEffect(player) {
         if (settings.speedPercent != 100) player.setPlaybackSpeed(settings.speedPercent / 100f)
         val key = resumeKey ?: return@LaunchedEffect
-        val saved = resumePosition(context, key)
+        val saved = prefs.getLong("resume:$key", 0L)
         if (saved > MIN_RESUME_MS && settings.resume) {
             player.seekTo(saved)
             if (initialNotice != null) return@LaunchedEffect // says more than where it resumed
@@ -303,11 +327,19 @@ fun TvPlayerScreen(
     DisposableEffect(player) {
         var becameReady = false
         var handedOff = false
+        fun recordStart() {
+            if (becameReady || handedOff) return
+            becameReady = true
+            prefs.recordPlaybackStart(anime.id, episode.number, currentServer.source, currentServer.resumeVariant, resumeKey)
+        }
         val listener = object : Player.Listener {
             override fun onIsPlayingChanged(value: Boolean) { isPlaying = value }
             override fun onPlaybackStateChanged(state: Int) {
                 playbackState = state
-                if (state == Player.STATE_READY) { becameReady = true; error = null }
+                if (state == Player.STATE_READY) {
+                    error = null
+                    recordStart()
+                }
                 if (state == Player.STATE_ENDED) {
                     resumeKey?.let { prefs.edit().remove("resume:$it").apply() }
                     markWatched()
@@ -320,12 +352,14 @@ fun TvPlayerScreen(
             override fun onVideoSizeChanged(value: VideoSize) { if (value.height > 0) videoHeight = value.height }
             override fun onPlayerError(playerError: PlaybackException) {
                 Log.w("TvPlayer", "player error: ${playerError.errorCodeName}: ${playerError.cause?.message}")
-                if (!becameReady && !handedOff && onStartFailure != null) { handedOff = true; onStartFailure(); return }
+                val fallback = currentStartFailure
+                if (!becameReady && !handedOff && fallback != null) { handedOff = true; fallback(); return }
                 panel = PlayerPanel.None
                 error = currentDescribeError(playerError)
             }
         }
         player.addListener(listener)
+        if (player.playbackState == Player.STATE_READY) recordStart()
         // Voice ("Alexa, next") and Bluetooth NEXT reach the app through the media session, so the
         // session's player offers "next" when there is a next episode.
         val sessionPlayer = object : ForwardingPlayer(player) {
@@ -590,10 +624,10 @@ fun TvPlayerScreen(
                 if (serversLoading) Text("Finding servers…", style = MaterialTheme.typography.bodyLarge)
                 else ServerOptions(serverOptions, currentServer, ServerInfo(currentServer.detail, videoHeights(tracks)), serverInfo, serverError, onClose = { panel = PlayerPanel.None; showControls() }) { choice ->
                     panel = PlayerPanel.None
-                    if (choice.source != currentServer.source || choice.server != currentServer.server) {
-                        // Carry on from here: each server keeps its own position, and this one's may be older.
+                    if (choice.key != currentServer.key) {
                         val at = player.currentPosition
-                        if (at > MIN_RESUME_MS) prefs.edit().putLong("resume:" + watchPositionKey(choice.source, anime.id, episode.number, choice.server?.let { "${it.name}:${it.language}" }), at).apply()
+                        val handoffKey = choice.handoffResumeKey(currentServer, anime.id, episode.number)
+                        if (handoffKey != null && at > MIN_RESUME_MS) prefs.edit().putLong("resume:$handoffKey", at).apply()
                         onChooseServer(choice)
                     } else showControls()
                 }
@@ -844,7 +878,7 @@ private fun ServerOptions(options: List<PlayerServer>, current: PlayerServer, cu
     val c = MaterialTheme.colorScheme
     val focus = remember { FocusRequester() }
     val groups = remember(options) { options.groupBy { it.group } }
-    val selected = options.indexOfFirst { it.source == current.source && it.server == current.server }.coerceAtLeast(0)
+    val selected = options.indexOfFirst { it.key == current.key }.coerceAtLeast(0)
     LaunchedEffect(options) { runCatching { focus.requestFocus() } }
     if (options.isEmpty()) {
         Text(if (failed) "Could not load servers." else "No servers are available.", style = MaterialTheme.typography.bodyLarge)
@@ -857,7 +891,7 @@ private fun ServerOptions(options: List<PlayerServer>, current: PlayerServer, cu
                 val choice = item.second
                 if (choice == null) Text(item.first, Modifier.padding(top = 12.dp, bottom = 2.dp), style = MaterialTheme.typography.titleSmall, color = c.secondary)
                 else {
-                    val active = choice.source == current.source && choice.server == current.server
+                    val active = choice.key == current.key
                     val label = choice.server?.name ?: choice.label
                     val offers = when {
                         active -> currentInfo.summary

@@ -40,7 +40,7 @@ import kotlin.reflect.KProperty
  * state, so a page reading one updates when it changes. The defaults keep the app as it was before
  * settings existed.
  */
-class UserSettings private constructor(context: Context, profileId: String) {
+class UserSettings private constructor(context: Context, val profileId: String) {
     private val prefs = Profiles.prefsFor(context, profileId)
 
     private inner class Flag(private val key: String, default: Boolean) : ReadWriteProperty<Any?, Boolean> {
@@ -221,7 +221,7 @@ fun SettingsPage(
                     SettingsSection.Playback -> {
                         item(key = "preferred-source") {
                             SettingChoice("Preferred source", "Used first when it has your preferred version", settings.preferredSource,
-                                listOf("gotaku" to "Gotaku", "reanime" to "Re:Anime"), first) { settings.preferredSource = it }
+                                listOf("gotaku" to "Gotaku", "megaplay" to "MegaPlay", "reanime" to "Re:Anime"), first) { settings.preferredSource = it }
                         }
                         item(key = "preferred-version") {
                             SettingChoice("Preferred version", "Uses another available version if needed", settings.preferredVersion,
