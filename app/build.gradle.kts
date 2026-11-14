@@ -6,7 +6,7 @@ android {
     namespace = "com.stremli.tv"
     compileSdk = 37
     defaultConfig {
-        applicationId = "com.stremli.tv"; minSdk = 25; targetSdk = 35; versionCode = 5; versionName = "1.0.3"
+        applicationId = "com.stremli.tv"; minSdk = 25; targetSdk = 35; versionCode = 6; versionName = "1.0.4"
         val reanimeHost = providers.fileContents(rootProject.layout.projectDirectory.file("tools/reanime-host.txt")).asText.get().trim()
         require(reanimeHost.matches(Regex("[a-z0-9.-]+")))
         buildConfigField("String", "REANIME_HOST", "\"$reanimeHost\"")
